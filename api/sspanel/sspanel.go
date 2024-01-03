@@ -771,6 +771,7 @@ func (c *APIClient) ParseSSPanelNodeInfo(nodeInfoResponse *NodeInfoResponse) (*a
 
 	switch c.NodeType {
 	case "Shadowsocks":
+		// dynamic
 		transportProtocol = nodeConfig.Network
 	case "V2ray":
 		transportProtocol = nodeConfig.Network
