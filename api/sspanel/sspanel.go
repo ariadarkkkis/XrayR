@@ -771,7 +771,7 @@ func (c *APIClient) ParseSSPanelNodeInfo(nodeInfoResponse *NodeInfoResponse) (*a
 
 	switch c.NodeType {
 	case "Shadowsocks":
-		transportProtocol = "tcp"
+		transportProtocol = nodeConfig.Network
 	case "V2ray":
 		transportProtocol = nodeConfig.Network
 
@@ -827,6 +827,7 @@ func (c *APIClient) ParseSSPanelNodeInfo(nodeInfoResponse *NodeInfoResponse) (*a
 		Header:            nodeConfig.Header,
 		EnableREALITY:     nodeConfig.EnableREALITY,
 		REALITYConfig:     realityConfig,
+		ServerKey:		   nodeConfig.ServerKey
 	}
 
 	return nodeInfo, nil

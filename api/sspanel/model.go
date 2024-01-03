@@ -16,23 +16,24 @@ type NodeInfoResponse struct {
 }
 
 type CustomConfig struct {
-	OffsetPortNode string          `json:"offset_port_node"`
-	Host           string          `json:"host"`
-	Method         string          `json:"method"`
-	TLS            string          `json:"tls"`
-	EnableVless    string          `json:"enable_vless"`
-	Network        string          `json:"network"`
-	Security       string          `json:"security"`
-	Path           string          `json:"path"`
-	VerifyCert     bool            `json:"verify_cert"`
-	Obfs           string          `json:"obfs"`
-	Header         json.RawMessage `json:"header"`
-	AllowInsecure  string          `json:"allow_insecure"`
-	Servicename    string          `json:"servicename"`
-	EnableXtls     string          `json:"enable_xtls"`
-	Flow           string          `json:"flow"`
-	EnableREALITY  bool            `json:"enable_reality"`
-	RealityOpts    *REALITYConfig  `json:"reality-opts"`
+	OffsetPortNode 		string          `json:"offset_port_node"`
+	Host           		string          `json:"host"`
+	Method         		string          `json:"method"`
+	TLS            		string          `json:"tls"`
+	EnableVless    		string          `json:"enable_vless"`
+	Network        		string          `json:"network"`
+	Security       		string          `json:"security"`
+	Path           		string          `json:"path"`
+	VerifyCert     		bool            `json:"verify_cert"`
+	Obfs           		string          `json:"obfs"`
+	Header         		json.RawMessage `json:"header"`
+	AllowInsecure  		string          `json:"allow_insecure"`
+	Servicename    		string          `json:"servicename"`
+	EnableXtls     		string          `json:"enable_xtls"`
+	Flow           		string          `json:"flow"`
+	EnableREALITY  		bool            `json:"enable_reality"`
+	RealityOpts    		*REALITYConfig  `json:"reality-opts"`
+	ServerKey      		string          `json:"server_key"`
 }
 
 // UserResponse is the response of user
