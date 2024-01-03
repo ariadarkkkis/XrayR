@@ -828,7 +828,7 @@ func (c *APIClient) ParseSSPanelNodeInfo(nodeInfoResponse *NodeInfoResponse) (*a
 		Header:            nodeConfig.Header,
 		EnableREALITY:     nodeConfig.EnableREALITY,
 		REALITYConfig:     realityConfig,
-		ServerKey:		   nodeConfig.ServerKey
+		ServerKey:		   nodeConfig.ServerKey,
 	}
 
 	return nodeInfo, nil
