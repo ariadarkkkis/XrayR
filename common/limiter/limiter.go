@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ariadarkkkis/XrayR/api"
 	"github.com/eko/gocache/lib/v4/cache"
 	"github.com/eko/gocache/lib/v4/marshaler"
 	"github.com/eko/gocache/lib/v4/store"
@@ -17,7 +18,6 @@ import (
 	goCache "github.com/patrickmn/go-cache"
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
-	"github.com/wyx2685/XrayR/api"
 	"golang.org/x/time/rate"
 )
 

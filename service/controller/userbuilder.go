@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ariadarkkkis/XrayR/api"
 	"github.com/sagernet/sing-shadowsocks/shadowaead_2022"
 	C "github.com/sagernet/sing/common"
 	log "github.com/sirupsen/logrus"
-	"github.com/wyx2685/XrayR/api"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/infra/conf"

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ariadarkkkis/XrayR/api"
 	mapset "github.com/deckarep/golang-set"
 	log "github.com/sirupsen/logrus"
-	"github.com/wyx2685/XrayR/api"
 )
 
 type Manager struct {
