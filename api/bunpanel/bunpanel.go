@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-resty/resty/v2"
-	log "github.com/sirupsen/logrus"
-	"github.com/wyx2685/XrayR/api"
 	"os"
 	"reflect"
 	"regexp"
@@ -15,6 +12,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ariadarkkkis/XrayR/api"
+	"github.com/go-resty/resty/v2"
+	log "github.com/sirupsen/logrus"
 )
 
 type APIClient struct {
