@@ -72,8 +72,27 @@ func InboundBuilder(config *Config, nodeInfo *api.NodeInfo, tag string) (*core.I
 					return nil, err
 				}
 			} else {
+				decryption := "none"
+				if nodeInfo.Decryption != "" && nodeInfo.Decryption != "none" {
+					switch nodeInfo.Decryption {
+					case "mlkem768x25519plus":
+						VlessDecryptionSettings := nodeInfo.VlessDecryptionSettings
+						parts := []string{
+							"mlkem768x25519plus",
+							VlessDecryptionSettings.Mode,
+							VlessDecryptionSettings.Ticket,
+						}
+						if VlessDecryptionSettings.ServerPadding != "" {
+							parts = append(parts, VlessDecryptionSettings.ServerPadding)
+						}
+						parts = append(parts, VlessDecryptionSettings.PrivateKey)
+						decryption = strings.Join(parts, ".")
+					default:
+						return nil, fmt.Errorf("vless decryption method %s is not support", nodeInfo.Decryption)
+					}
+				}
 				proxySetting = &conf.VLessInboundConfig{
-					Decryption: "none",
+					Decryption: decryption,
 				}
 			}
 		} else {
