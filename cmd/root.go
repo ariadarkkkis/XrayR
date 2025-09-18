@@ -13,26 +13,80 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/ariadarkkkis/XrayR/panel"
+
+	// Import xray-core commands
+
+	"github.com/xtls/xray-core/main/commands/base"
+
+	// Import all xray-core command implementations (this will register them globally)
+	_ "github.com/xtls/xray-core/main/commands/all"
 )
 
 var (
 	cfgFile string
-	rootCmd = &cobra.Command{
-		Use: "XrayR",
-		Run: func(cmd *cobra.Command, args []string) {
-			if err := run(); err != nil {
-				log.Fatal(err)
-			}
-		},
+
+	// XrayR main command using xray-core command system
+	xrayRCmd = &base.Command{
+		UsageLine: "XrayR [-c config.yml]",
+		Short:     "XrayR - A Xray backend framework",
+		Long: `
+XrayR - A Xray backend framework that supports multiple panels.
+
+Arguments:
+	-c, --config <config.yml>
+		Config file for XrayR.
+`,
+		Run: runXrayR,
 	}
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "Config file for XrayR.")
+	// Setup XrayR as the default command when no subcommands are provided
+	base.RootCommand.UsageLine = "XrayR [-c config.yml]"
+	base.RootCommand.Short = "XrayR - A Xray backend framework"
+	base.RootCommand.Long = `
+XrayR - A Xray backend framework that supports multiple panels.
+
+Arguments:
+	-c, --config <config.yml>
+		Config file for XrayR.
+
+Use "XrayR help <command>" for more information about a command.
+`
+	base.RootCommand.Run = runXrayR
+
+	// Register config flags with the root command
+	base.RootCommand.Flag.StringVar(&cfgFile, "c", "", "Config file for XrayR")
+	base.RootCommand.Flag.StringVar(&cfgFile, "config", "", "Config file for XrayR")
+
+	// Add our custom version command
+	base.RootCommand.Commands = append(base.RootCommand.Commands, cmdVersion)
+
+	// Filter out API command and duplicates from the already registered xray-core commands
+	filteredCommands := []*base.Command{}
+	seen := make(map[string]bool)
+
+	for _, cmd := range base.RootCommand.Commands {
+		cmdName := cmd.Name()
+		// Skip API command and duplicates
+		if cmdName == "api" || seen[cmdName] {
+			continue
+		}
+		seen[cmdName] = true
+		filteredCommands = append(filteredCommands, cmd)
+	}
+
+	// Replace the command list with the filtered one
+	base.RootCommand.Commands = filteredCommands
+}
+
+func runXrayR(cmd *base.Command, args []string) {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func getConfig() *viper.Viper {
@@ -116,6 +170,8 @@ func run() error {
 	return nil
 }
 
+// Deprecated: Use base.Execute() instead
 func Execute() error {
-	return rootCmd.Execute()
+	base.RootCommand.Run(base.RootCommand, os.Args[1:])
+	return nil
 }
