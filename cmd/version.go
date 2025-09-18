@@ -3,25 +3,31 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
+	"github.com/xtls/xray-core/main/commands/base"
 )
 
 var (
-	version  = "0.9.5-25.6.8"
+	version  = "0.9.6-25.9.11"
 	codename = "XrayR"
-	intro    = "A Xray backend that supports many panels"
 )
 
+var cmdVersion = &base.Command{
+	UsageLine: `{{.Exec}} version`,
+	Short:     `Print current version of XrayR`,
+	Long: `
+Print current version of XrayR including codename and description.
+`,
+	Run: executeVersion,
+}
+
 func init() {
-	rootCmd.AddCommand(&cobra.Command{
-		Use:   "version",
-		Short: "Print current version of XrayR",
-		Run: func(cmd *cobra.Command, args []string) {
-			showVersion()
-		},
-	})
+	cmdVersion.Run = executeVersion // break init loop
+}
+
+func executeVersion(cmd *base.Command, args []string) {
+	showVersion()
 }
 
 func showVersion() {
-	fmt.Printf("%s %s (%s) \n", codename, version, intro)
+	fmt.Printf("%s %s \n", codename, version)
 }
