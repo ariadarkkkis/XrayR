@@ -28,14 +28,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-cat >"$work_dir/config.yml" <<'EOF'
-Log:
-  Level: warning
-Nodes: []
-EOF
-
 docker build --pull -t "$image_tag" "$repository_root"
-container_id=$(docker run -d --volume "$work_dir/config.yml:/etc/XrayR/config.yml:ro" "$image_tag")
+container_id=$(docker run -d --volume "$repository_root/release/config/smoke-config.yml:/etc/XrayR/config.yml:ro" "$image_tag")
 
 attempt=0
 while [ "$attempt" -lt 10 ] && [ "$(docker inspect -f '{{.State.Running}}' "$container_id")" != "true" ]; do
@@ -46,9 +40,11 @@ done
 	docker logs "$container_id" >&2
 	exit 1
 }
-docker exec "$container_id" test -s /etc/XrayR/geoip.dat
-docker exec "$container_id" test -s /etc/XrayR/geosite.dat
-docker exec "$container_id" XrayR version | grep -F "XrayR $XRAYR_VERSION" >/dev/null
+docker cp "$container_id:/etc/XrayR/geoip.dat" "$work_dir/geoip.dat"
+docker cp "$container_id:/etc/XrayR/geosite.dat" "$work_dir/geosite.dat"
+test -s "$work_dir/geoip.dat"
+test -s "$work_dir/geosite.dat"
+docker exec "$container_id" /usr/local/bin/XrayR version | grep -F "XrayR $XRAYR_VERSION" >/dev/null
 docker logs "$container_id" 2>&1 | grep -F "Xray Core Version: ${XRAY_CORE_RELEASE#v}" >/dev/null
 
 echo "Production container smoke check passed"

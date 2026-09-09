@@ -79,10 +79,30 @@ func TestProductionContainerUsesAlignedBuilderAndPackagedAssets(t *testing.T) {
 	require.NoError(t, err)
 	contents := string(dockerfile)
 
-	require.Contains(t, contents, "FROM golang:1.26-alpine AS builder")
+	require.Contains(t, contents, "FROM golang:1.26.0-alpine3.23@sha256:d4c4845f5d60c6a974c6000ce58ae079328d03ab7f721a0734277e69905473e5 AS builder")
+	require.Contains(t, contents, "FROM scratch")
 	require.NotContains(t, contents, "raw.githubusercontent.com", "container builds must use the repository's qualified assets")
 	require.Contains(t, contents, "COPY release/config/geoip.dat /etc/XrayR/geoip.dat")
 	require.Contains(t, contents, "COPY release/config/geosite.dat /etc/XrayR/geosite.dat")
+}
+
+func TestReleaseBuildRejectsUnrecordedSourceChanges(t *testing.T) {
+	buildScript, err := os.ReadFile(filepath.Join(repositoryRoot(t), "scripts", "build-release.sh"))
+	require.NoError(t, err)
+	contents := string(buildScript)
+
+	require.Contains(t, contents, "git diff --quiet HEAD --")
+	require.Contains(t, contents, "git -C \"$repository_root\" status --porcelain --untracked-files=all")
+	require.Contains(t, contents, "release inputs differ from the recorded source commit")
+}
+
+func TestReleaseStartupSmokeRequiresLongRunningService(t *testing.T) {
+	smokeScript, err := os.ReadFile(filepath.Join(repositoryRoot(t), "scripts", "smoke-release.sh"))
+	require.NoError(t, err)
+	contents := string(smokeScript)
+
+	require.Contains(t, contents, `[ "$startup_status" -eq 124 ]`)
+	require.NotContains(t, contents, `[ "$startup_status" -eq 0 ] ||`)
 }
 
 func TestReleaseMetadataMatchesEmbeddedVersions(t *testing.T) {

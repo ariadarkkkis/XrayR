@@ -48,18 +48,14 @@ smoke_archive() {
 			printf '%s\n' "$x25519_output" | grep -F "Password (PublicKey):" >/dev/null
 			printf '%s\n' "$x25519_output" | grep -F "Hash32:" >/dev/null
 
-			cat >"$work_dir/smoke-config.yml" <<'EOF'
-Log:
-  Level: warning
-Nodes: []
-EOF
 			set +e
-			timeout --signal=TERM 3 "$binary" --config "$work_dir/smoke-config.yml" >"$work_dir/startup.log" 2>&1
+			timeout --signal=TERM 3 "$binary" --config "$repository_root/release/config/smoke-config.yml" >"$work_dir/startup.log" 2>&1
 			startup_status=$?
 			set -e
-			[ "$startup_status" -eq 0 ] || [ "$startup_status" -eq 124 ] || {
+			[ "$startup_status" -eq 124 ] || {
 				cat "$work_dir/startup.log" >&2
-				exit "$startup_status"
+				echo "XrayR exited before the startup observation window (status $startup_status)" >&2
+				exit 1
 			}
 			grep -F "Xray Core Version: ${XRAY_CORE_RELEASE#v}" "$work_dir/startup.log" >/dev/null
 			;;
