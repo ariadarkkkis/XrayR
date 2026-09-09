@@ -54,8 +54,10 @@ actual_xray_module=$(go list -m -f '{{.Version}}' github.com/xtls/xray-core)
 
 set -- \
 	':(glob)**/*.go' \
-	go.mod go.sum README.md LICENSE \
-	release/release.env 'release/config/**'
+	go.mod go.sum go.work go.work.sum README.md LICENSE \
+	Dockerfile .dockerignore \
+	release/release.env 'release/config/**' \
+	'scripts/**' '.github/workflows/release.yml'
 git -C "$repository_root" diff --quiet HEAD -- "$@" || {
 	echo "release inputs differ from the recorded source commit; commit them before building" >&2
 	exit 1
