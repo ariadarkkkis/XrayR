@@ -147,6 +147,10 @@ func (c *Controller) DeleteInboundLimiter(tag string) error {
 	return err
 }
 
+func (c *Controller) DeleteInboundUsers(tag string, users []string) error {
+	return c.dispatcher.Limiter.DeleteInboundUsers(tag, users)
+}
+
 func (c *Controller) GetOnlineDevice(tag string) (*[]api.OnlineUser, error) {
 	return c.dispatcher.Limiter.GetOnlineDevice(tag)
 }

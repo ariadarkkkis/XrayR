@@ -11,6 +11,7 @@ import (
 
 	"github.com/sagernet/sing-shadowsocks/shadowaead_2022"
 	C "github.com/sagernet/sing/common"
+	log "github.com/sirupsen/logrus"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/infra/conf"
@@ -117,6 +118,9 @@ func InboundBuilder(config *Config, nodeInfo *api.NodeInfo, tag string) (*core.I
 	case "Shadowsocks", "Shadowsocks-Plugin":
 		protocol = "shadowsocks"
 		cipher := strings.ToLower(nodeInfo.CypherMethod)
+		if !isSupportedShadowsocksMethod(cipher) {
+			return nil, fmt.Errorf("node %d: unsupported Shadowsocks method %q", nodeInfo.NodeID, nodeInfo.CypherMethod)
+		}
 
 		proxySetting = &conf.ShadowsocksServerConfig{
 			Cipher:   cipher,
@@ -138,9 +142,8 @@ func InboundBuilder(config *Config, nodeInfo *api.NodeInfo, tag string) (*core.I
 		}
 
 		proxySetting.NetworkList = &conf.NetworkList{"tcp", "udp"}
-		proxySetting.IVCheck = true
 		if config.DisableIVCheck {
-			proxySetting.IVCheck = false
+			log.Warn("DisableIVCheck is deprecated: changing Shadowsocks IV checking is no longer supported by Xray-core; the setting is accepted but ignored")
 		}
 
 	case "dokodemo-door":
@@ -215,12 +218,19 @@ func InboundBuilder(config *Config, nodeInfo *api.NodeInfo, tag string) (*core.I
 	var isREALITY bool
 	if config.DisableLocalREALITYConfig {
 		if nodeInfo.REALITYConfig != nil && nodeInfo.EnableREALITY {
+			if err := validateREALITYShortIDs(nodeInfo.NodeID, nodeInfo.REALITYConfig.ShortIds); err != nil {
+				return nil, err
+			}
 			isREALITY = true
 			streamSetting.Security = "reality"
 
 			r := nodeInfo.REALITYConfig
+			show := nodeInfo.Show
+			if config.REALITYConfigs != nil {
+				show = config.REALITYConfigs.Show
+			}
 			streamSetting.REALITYSettings = &conf.REALITYConfig{
-				Show:         config.REALITYConfigs.Show,
+				Show:         show,
 				Dest:         []byte(`"` + r.Dest + `"`),
 				Xver:         r.ProxyProtocolVer,
 				ServerNames:  r.ServerNames,
@@ -233,6 +243,13 @@ func InboundBuilder(config *Config, nodeInfo *api.NodeInfo, tag string) (*core.I
 		}
 	} else if config.EnableREALITY && config.REALITYConfigs != nil {
 		isREALITY = true
+		shortIDs := append([]string(nil), config.REALITYConfigs.ShortIds...)
+		if nodeInfo.REALITYConfig != nil {
+			shortIDs = append(shortIDs, nodeInfo.REALITYConfig.ShortIds...)
+		}
+		if err := validateREALITYShortIDs(nodeInfo.NodeID, shortIDs); err != nil {
+			return nil, err
+		}
 		dest, err := json.Marshal(config.REALITYConfigs.Dest)
 		if err != nil {
 			return nil, fmt.Errorf("marshal dest %s config fialed: %s", dest, err)
@@ -253,7 +270,7 @@ func InboundBuilder(config *Config, nodeInfo *api.NodeInfo, tag string) (*core.I
 			MinClientVer: config.REALITYConfigs.MinClientVer,
 			MaxClientVer: config.REALITYConfigs.MaxClientVer,
 			MaxTimeDiff:  config.REALITYConfigs.MaxTimeDiff,
-			ShortIds:     append(config.REALITYConfigs.ShortIds, nodeInfo.REALITYConfig.ShortIds...),
+			ShortIds:     shortIDs,
 		}
 	}
 
@@ -280,6 +297,40 @@ func InboundBuilder(config *Config, nodeInfo *api.NodeInfo, tag string) (*core.I
 	inboundDetourConfig.StreamSetting = streamSetting
 
 	return inboundDetourConfig.Build()
+}
+
+func isSupportedShadowsocksMethod(method string) bool {
+	if C.Contains(shadowaead_2022.List, method) {
+		return true
+	}
+	switch method {
+	case "aes-128-gcm", "aead_aes_128_gcm",
+		"aes-256-gcm", "aead_aes_256_gcm",
+		"chacha20-poly1305", "aead_chacha20_poly1305", "chacha20-ietf-poly1305",
+		"xchacha20-poly1305", "aead_xchacha20_poly1305", "xchacha20-ietf-poly1305",
+		"none", "plain":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateREALITYShortIDs(nodeID int, shortIDs []string) error {
+	if len(shortIDs) == 0 {
+		return fmt.Errorf("node %d REALITY shortIds: at least one short ID is required", nodeID)
+	}
+	for i, shortID := range shortIDs {
+		if len(shortID) > 16 {
+			return fmt.Errorf("node %d REALITY shortIds[%d]: must be at most 16 hexadecimal characters", nodeID, i)
+		}
+		if len(shortID)%2 != 0 {
+			return fmt.Errorf("node %d REALITY shortIds[%d]: must contain an even number of hexadecimal characters", nodeID, i)
+		}
+		if _, err := hex.DecodeString(shortID); err != nil {
+			return fmt.Errorf("node %d REALITY shortIds[%d]: must contain only hexadecimal characters", nodeID, i)
+		}
+	}
+	return nil
 }
 
 func getCertFile(certConfig *mylego.CertConfig) (certFile string, keyFile string, err error) {

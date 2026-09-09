@@ -41,12 +41,12 @@ func (c *Controller) buildVmessUser(userInfo *[]api.UserInfo) (users []*protocol
 	return users
 }
 
-func (c *Controller) buildVlessUser(userInfo *[]api.UserInfo) (users []*protocol.User) {
+func (c *Controller) buildVlessUser(userInfo *[]api.UserInfo, flow string) (users []*protocol.User) {
 	users = make([]*protocol.User, len(*userInfo))
 	for i, user := range *userInfo {
 		vlessAccount := &vless.Account{
 			Id:   user.UUID,
-			Flow: c.nodeInfo.VlessFlow,
+			Flow: flow,
 		}
 		users[i] = &protocol.User{
 			Level:   0,
@@ -150,6 +150,8 @@ func cipherFromString(c string) shadowsocks.CipherType {
 		return shadowsocks.CipherType_AES_256_GCM
 	case "chacha20-poly1305", "aead_chacha20_poly1305", "chacha20-ietf-poly1305":
 		return shadowsocks.CipherType_CHACHA20_POLY1305
+	case "xchacha20-poly1305", "aead_xchacha20_poly1305", "xchacha20-ietf-poly1305":
+		return shadowsocks.CipherType_XCHACHA20_POLY1305
 	case "none", "plain":
 		return shadowsocks.CipherType_NONE
 	default:

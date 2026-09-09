@@ -3,6 +3,7 @@ package limiter
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/buf"
@@ -13,6 +14,31 @@ type Writer struct {
 	writer  buf.Writer
 	limiter *rate.Limiter
 	w       io.Writer
+}
+
+type Reader struct {
+	reader  buf.TimeoutReader
+	limiter *rate.Limiter
+}
+
+func (l *Limiter) RateReader(reader buf.TimeoutReader, limiter *rate.Limiter) buf.TimeoutReader {
+	return &Reader{reader: reader, limiter: limiter}
+}
+
+func (r *Reader) ReadMultiBuffer() (buf.MultiBuffer, error) {
+	mb, err := r.reader.ReadMultiBuffer()
+	if !mb.IsEmpty() {
+		_ = r.limiter.WaitN(context.Background(), int(mb.Len()))
+	}
+	return mb, err
+}
+
+func (r *Reader) ReadMultiBufferTimeout(timeout time.Duration) (buf.MultiBuffer, error) {
+	mb, err := r.reader.ReadMultiBufferTimeout(timeout)
+	if !mb.IsEmpty() {
+		_ = r.limiter.WaitN(context.Background(), int(mb.Len()))
+	}
+	return mb, err
 }
 
 func (l *Limiter) RateWriter(writer buf.Writer, limiter *rate.Limiter) buf.Writer {

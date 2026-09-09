@@ -260,33 +260,14 @@ func (c *Controller) reconcileOnce() error {
 		}
 	}
 
+	runtimeReplaced := false
 	// If nodeInfo changed
 	if nodeInfoChanged {
 		if !reflect.DeepEqual(c.nodeInfo, newNodeInfo) {
-			// Remove old tag
-			oldTag := c.Tag
-			err := c.removeOldTag(oldTag)
-			if err != nil {
-				return fmt.Errorf("remove old runtime tag: %w", err)
+			if err := c.replaceNodeRuntime(newNodeInfo, newUserInfo); err != nil {
+				return err
 			}
-			if c.nodeInfo.NodeType == "Shadowsocks-Plugin" {
-				err = c.removeOldTag(fmt.Sprintf("dokodemo-door_%s+1", c.Tag))
-			}
-			if err != nil {
-				return fmt.Errorf("remove old plugin runtime tag: %w", err)
-			}
-			// Add new tag
-			c.nodeInfo = newNodeInfo
-			c.Tag = c.buildNodeTag()
-			err = c.addNewTag(newNodeInfo)
-			if err != nil {
-				return fmt.Errorf("add refreshed runtime tag: %w", err)
-			}
-			nodeInfoChanged = true
-			// Remove Old limiter
-			if err = c.DeleteInboundLimiter(oldTag); err != nil {
-				return fmt.Errorf("remove old inbound limiter: %w", err)
-			}
+			runtimeReplaced = true
 		} else {
 			nodeInfoChanged = false
 		}
@@ -305,34 +286,31 @@ func (c *Controller) reconcileOnce() error {
 		}
 	}
 
-	if nodeInfoChanged {
-		err = c.addNewUser(newUserInfo, newNodeInfo)
-		if err != nil {
-			return fmt.Errorf("add refreshed users: %w", err)
-		}
-
-		// Add Limiter
-		if err := c.AddInboundLimiter(c.Tag, newNodeInfo.SpeedLimit, newUserInfo, c.config.GlobalDeviceLimitConfig); err != nil {
-			return fmt.Errorf("add refreshed inbound limiter: %w", err)
-		}
-
-	} else {
+	if !runtimeReplaced {
 		var deleted, added []api.UserInfo
 		if usersChanged {
 			deleted, added = compareUserList(c.userList, newUserInfo)
+			if len(added) > 0 {
+				if _, err := c.buildRuntimeUsers(&added, c.nodeInfo); err != nil {
+					return fmt.Errorf("validate refreshed users: %w", err)
+				}
+			}
+
+			var deletedEmail []string
 			if len(deleted) > 0 {
-				deletedEmail := make([]string, len(deleted))
+				deletedEmail = make([]string, len(deleted))
 				for i, u := range deleted {
 					deletedEmail[i] = fmt.Sprintf("%s|%s|%d", c.Tag, u.Email, u.UID)
 				}
-				err := c.removeUsers(deletedEmail, c.Tag)
-				if err != nil {
+				if err := c.removeUsers(deletedEmail, c.Tag); err != nil {
 					return fmt.Errorf("remove stale users: %w", err)
+				}
+				if err := c.DeleteInboundUsers(c.Tag, deletedEmail); err != nil {
+					return fmt.Errorf("remove stale users from limiter: %w", err)
 				}
 			}
 			if len(added) > 0 {
-				err = c.addNewUser(&added, c.nodeInfo)
-				if err != nil {
+				if err := c.addNewUser(&added, c.nodeInfo); err != nil {
 					return fmt.Errorf("add refreshed users: %w", err)
 				}
 				// Update Limiter
@@ -357,6 +335,105 @@ func (c *Controller) removeOldTag(oldTag string) (err error) {
 		return err
 	}
 	return nil
+}
+
+func (c *Controller) replaceNodeRuntime(newNodeInfo *api.NodeInfo, newUserInfo *[]api.UserInfo) error {
+	oldNodeInfo := c.nodeInfo
+	oldUserInfo := c.userList
+	oldTag := c.Tag
+	newTag := c.buildNodeTagFor(newNodeInfo)
+
+	if err := c.validateNodeRuntime(newNodeInfo, newUserInfo, newTag); err != nil {
+		return fmt.Errorf("validate refreshed runtime: %w", err)
+	}
+	if err := c.removeNodeRuntime(oldNodeInfo, oldTag); err != nil {
+		restoreErr := c.restoreNodeRuntime(oldNodeInfo, oldUserInfo, oldTag, newNodeInfo, newTag)
+		return errors.Join(fmt.Errorf("remove old runtime tag: %w", err), restoreErr)
+	}
+
+	c.nodeInfo = newNodeInfo
+	c.Tag = newTag
+	if err := c.addNewTag(newNodeInfo); err != nil {
+		restoreErr := c.restoreNodeRuntime(oldNodeInfo, oldUserInfo, oldTag, newNodeInfo, newTag)
+		return errors.Join(fmt.Errorf("add refreshed runtime tag: %w", err), restoreErr)
+	}
+	if err := c.addNewUser(newUserInfo, newNodeInfo); err != nil {
+		restoreErr := c.restoreNodeRuntime(oldNodeInfo, oldUserInfo, oldTag, newNodeInfo, newTag)
+		return errors.Join(fmt.Errorf("add refreshed users: %w", err), restoreErr)
+	}
+	if err := c.AddInboundLimiter(newTag, newNodeInfo.SpeedLimit, newUserInfo, c.config.GlobalDeviceLimitConfig); err != nil {
+		restoreErr := c.restoreNodeRuntime(oldNodeInfo, oldUserInfo, oldTag, newNodeInfo, newTag)
+		return errors.Join(fmt.Errorf("add refreshed inbound limiter: %w", err), restoreErr)
+	}
+	if oldTag != newTag {
+		if err := c.DeleteInboundLimiter(oldTag); err != nil {
+			return fmt.Errorf("remove old inbound limiter: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) validateNodeRuntime(nodeInfo *api.NodeInfo, userInfo *[]api.UserInfo, tag string) error {
+	if _, err := c.buildRuntimeUsers(userInfo, nodeInfo); err != nil {
+		return err
+	}
+	if nodeInfo.NodeType != "Shadowsocks-Plugin" {
+		if _, err := InboundBuilder(c.config, nodeInfo, tag); err != nil {
+			return err
+		}
+		_, err := OutboundBuilder(c.config, nodeInfo, tag)
+		return err
+	}
+
+	shadowsocksNode := *nodeInfo
+	shadowsocksNode.TransportProtocol = "tcp"
+	shadowsocksNode.EnableTLS = false
+	if _, err := InboundBuilder(c.config, &shadowsocksNode, tag); err != nil {
+		return err
+	}
+	if _, err := OutboundBuilder(c.config, &shadowsocksNode, tag); err != nil {
+		return err
+	}
+	pluginNode := *nodeInfo
+	pluginNode.Port++
+	pluginNode.NodeType = "dokodemo-door"
+	pluginTag := fmt.Sprintf("dokodemo-door_%s+1", tag)
+	if _, err := InboundBuilder(c.config, &pluginNode, pluginTag); err != nil {
+		return err
+	}
+	_, err := OutboundBuilder(c.config, &pluginNode, pluginTag)
+	return err
+}
+
+func (c *Controller) removeNodeRuntime(nodeInfo *api.NodeInfo, tag string) error {
+	var runtimeErrors []error
+	if err := c.removeOldTag(tag); err != nil {
+		runtimeErrors = append(runtimeErrors, err)
+	}
+	if nodeInfo != nil && nodeInfo.NodeType == "Shadowsocks-Plugin" {
+		if err := c.removeOldTag(fmt.Sprintf("dokodemo-door_%s+1", tag)); err != nil {
+			runtimeErrors = append(runtimeErrors, err)
+		}
+	}
+	return errors.Join(runtimeErrors...)
+}
+
+func (c *Controller) restoreNodeRuntime(oldNodeInfo *api.NodeInfo, oldUserInfo *[]api.UserInfo, oldTag string, newNodeInfo *api.NodeInfo, newTag string) error {
+	_ = c.removeNodeRuntime(newNodeInfo, newTag)
+	c.nodeInfo = oldNodeInfo
+	c.Tag = oldTag
+	var restoreErrors []error
+	if err := c.addNewTag(oldNodeInfo); err != nil {
+		restoreErrors = append(restoreErrors, fmt.Errorf("restore previous handlers: %w", err))
+		return errors.Join(restoreErrors...)
+	}
+	if err := c.addNewUser(oldUserInfo, oldNodeInfo); err != nil {
+		restoreErrors = append(restoreErrors, fmt.Errorf("restore previous users: %w", err))
+	}
+	if err := c.AddInboundLimiter(oldTag, oldNodeInfo.SpeedLimit, oldUserInfo, c.config.GlobalDeviceLimitConfig); err != nil {
+		restoreErrors = append(restoreErrors, fmt.Errorf("restore previous limiter: %w", err))
+	}
+	return errors.Join(restoreErrors...)
 }
 
 func (c *Controller) addNewTag(newNodeInfo *api.NodeInfo) (err error) {
@@ -440,11 +517,23 @@ func (c *Controller) addInboundForSSPlugin(newNodeInfo api.NodeInfo) (err error)
 }
 
 func (c *Controller) addNewUser(userInfo *[]api.UserInfo, nodeInfo *api.NodeInfo) (err error) {
+	users, err := c.buildRuntimeUsers(userInfo, nodeInfo)
+	if err != nil {
+		return err
+	}
+	if err = c.addUsers(users, c.Tag); err != nil {
+		return err
+	}
+	c.logger.Printf("Added %d new users", len(*userInfo))
+	return nil
+}
+
+func (c *Controller) buildRuntimeUsers(userInfo *[]api.UserInfo, nodeInfo *api.NodeInfo) ([]*protocol.User, error) {
 	users := make([]*protocol.User, 0)
 	switch nodeInfo.NodeType {
 	case "V2ray", "Vmess", "Vless":
 		if nodeInfo.EnableVless || (nodeInfo.NodeType == "Vless" && nodeInfo.NodeType != "Vmess") {
-			users = c.buildVlessUser(userInfo)
+			users = c.buildVlessUser(userInfo, nodeInfo.VlessFlow)
 		} else {
 			users = c.buildVmessUser(userInfo)
 		}
@@ -455,15 +544,18 @@ func (c *Controller) addNewUser(userInfo *[]api.UserInfo, nodeInfo *api.NodeInfo
 	case "Shadowsocks-Plugin":
 		users = c.buildSSPluginUser(userInfo)
 	default:
-		return fmt.Errorf("unsupported node type: %s", nodeInfo.NodeType)
+		return nil, fmt.Errorf("unsupported node type: %s", nodeInfo.NodeType)
 	}
 
-	err = c.addUsers(users, c.Tag)
-	if err != nil {
-		return err
+	for index, user := range users {
+		if user == nil {
+			return nil, fmt.Errorf("node %d user %d cannot be represented by the configured protocol", nodeInfo.NodeID, (*userInfo)[index].UID)
+		}
+		if _, err := user.ToMemoryUser(); err != nil {
+			return nil, fmt.Errorf("node %d user %d has invalid protocol credentials: %w", nodeInfo.NodeID, (*userInfo)[index].UID, err)
+		}
 	}
-	c.logger.Printf("Added %d new users", len(*userInfo))
-	return nil
+	return users, nil
 }
 
 func compareUserList(old, new *[]api.UserInfo) (deleted, added []api.UserInfo) {
@@ -710,7 +802,11 @@ func appendUniqueDetectResults(existing, additions []api.DetectResult) []api.Det
 }
 
 func (c *Controller) buildNodeTag() string {
-	return fmt.Sprintf("%s_%s_%d", c.nodeInfo.NodeType, c.config.ListenIP, c.nodeInfo.Port)
+	return c.buildNodeTagFor(c.nodeInfo)
+}
+
+func (c *Controller) buildNodeTagFor(nodeInfo *api.NodeInfo) string {
+	return fmt.Sprintf("%s_%s_%d", nodeInfo.NodeType, c.config.ListenIP, nodeInfo.Port)
 }
 
 // func (c *Controller) logPrefix() string {

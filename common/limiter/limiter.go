@@ -131,6 +131,20 @@ func (l *Limiter) DeleteInboundLimiter(tag string) error {
 	return nil
 }
 
+func (l *Limiter) DeleteInboundUsers(tag string, users []string) error {
+	value, ok := l.InboundInfo.Load(tag)
+	if !ok {
+		return fmt.Errorf("no such inbound in limiter: %s", tag)
+	}
+	inboundInfo := value.(*InboundInfo)
+	for _, user := range users {
+		inboundInfo.UserInfo.Delete(user)
+		inboundInfo.BucketHub.Delete(user)
+		inboundInfo.UserOnlineIP.Delete(user)
+	}
+	return nil
+}
+
 func (l *Limiter) GetOnlineDevice(tag string) (*[]api.OnlineUser, error) {
 	var onlineUser []api.OnlineUser
 
