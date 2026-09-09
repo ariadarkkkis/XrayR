@@ -52,17 +52,15 @@ actual_xray_module=$(go list -m -f '{{.Version}}' github.com/xtls/xray-core)
 	exit 1
 }
 
-git -C "$repository_root" diff --quiet HEAD -- \
+set -- \
 	':(glob)**/*.go' \
 	go.mod go.sum README.md LICENSE \
-	release/release.env 'release/config/**' || {
+	release/release.env 'release/config/**'
+git -C "$repository_root" diff --quiet HEAD -- "$@" || {
 	echo "release inputs differ from the recorded source commit; commit them before building" >&2
 	exit 1
 }
-release_changes=$(git -C "$repository_root" status --porcelain --untracked-files=all -- \
-	':(glob)**/*.go' \
-	go.mod go.sum README.md LICENSE \
-	release/release.env 'release/config/**')
+release_changes=$(git -C "$repository_root" status --porcelain --untracked-files=all -- "$@")
 [ -z "$release_changes" ] || {
 	printf '%s\n' "$release_changes" >&2
 	echo "release inputs differ from the recorded source commit; commit them before building" >&2
