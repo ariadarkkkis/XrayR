@@ -1,0 +1,13 @@
+.git
+.scratch
+.idea
+out
+gen
+*.exe
+*.test
+*.out
+access.log
+error.log
+.lego
+cert
+config.yml
