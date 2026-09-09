@@ -37,9 +37,11 @@ func (r *Reader) ReadMultiBuffer() (buf.MultiBuffer, error) {
 }
 
 func (r *Reader) ReadMultiBufferTimeout(timeout time.Duration) (buf.MultiBuffer, error) {
+	started := time.Now()
 	mb, err := r.reader.ReadMultiBufferTimeout(timeout)
 	if !mb.IsEmpty() {
-		if waitErr := waitForTokens(r.limiter, int(mb.Len())); waitErr != nil && err == nil {
+		remaining := timeout - time.Since(started)
+		if waitErr := reserveTokensUpTo(r.limiter, int(mb.Len()), remaining); waitErr != nil && err == nil {
 			err = waitErr
 		}
 	}
@@ -83,5 +85,27 @@ func waitForTokens(limiter *rate.Limiter, count int) error {
 		}
 		count -= chunk
 	}
+	return nil
+}
+
+func reserveTokensUpTo(limiter *rate.Limiter, count int, maximumWait time.Duration) error {
+	if limiter.Burst() <= 0 {
+		return fmt.Errorf("rate limiter burst must be positive")
+	}
+	now := time.Now()
+	var delay time.Duration
+	for count > 0 {
+		chunk := min(count, limiter.Burst())
+		reservation := limiter.ReserveN(now, chunk)
+		if !reservation.OK() {
+			return fmt.Errorf("rate limiter cannot reserve %d tokens", chunk)
+		}
+		delay = max(delay, reservation.DelayFrom(now))
+		count -= chunk
+	}
+	if maximumWait <= 0 {
+		return nil
+	}
+	time.Sleep(min(delay, maximumWait))
 	return nil
 }

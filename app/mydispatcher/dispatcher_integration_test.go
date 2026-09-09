@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"testing"
 	"time"
 
@@ -60,6 +61,20 @@ func TestRealConnectionTraversesPolicyAndAccountingHooks(t *testing.T) {
 	online, err := dispatcher.Limiter.GetOnlineDevice("dispatcher")
 	require.NoError(t, err)
 	require.Contains(t, *online, api.OnlineUser{UID: 7, IP: "127.0.0.1"})
+
+	require.NoError(t, dispatcher.RuleManager.UpdateRule("dispatcher", []api.DetectRule{{
+		ID:      99,
+		Pattern: regexp.MustCompile(regexp.QuoteMeta(echoAddress.String())),
+	}}))
+	rejectedConn := dialSOCKS5(t, proxyPort, "dispatcher|fixture|7", "fixture-password", echoAddress)
+	t.Cleanup(func() { _ = rejectedConn.Close() })
+	require.NoError(t, rejectedConn.SetDeadline(time.Now().Add(5*time.Second)))
+	_, _ = rejectedConn.Write([]byte("must be rejected"))
+	_, err = rejectedConn.Read(make([]byte, 1))
+	require.Error(t, err, "audit rule must terminate the real connection")
+	detections, err := dispatcher.RuleManager.GetDetectResult("dispatcher")
+	require.NoError(t, err)
+	require.Contains(t, *detections, api.DetectResult{UID: 7, RuleID: 99})
 }
 
 func startDispatcherCore(t *testing.T, port int) *core.Instance {

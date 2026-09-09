@@ -39,13 +39,28 @@ func TestDeleteInboundUsersClearsRuntimeState(t *testing.T) {
 func TestRateReaderThrottlesBuffersLargerThanBurst(t *testing.T) {
 	const bytesPerSecond = 1000
 	reader := &singleMultiBufferReader{buffer: buf.MultiBuffer{buf.FromBytes(make([]byte, 1100))}}
-	limited := New().RateReader(reader, rate.NewLimiter(bytesPerSecond, bytesPerSecond))
+	bucket := rate.NewLimiter(bytesPerSecond, bytesPerSecond)
+	limited := New().RateReader(reader, bucket)
 
 	started := time.Now()
 	result, err := limited.ReadMultiBuffer()
 	require.NoError(t, err)
 	buf.ReleaseMulti(result)
 	require.GreaterOrEqual(t, time.Since(started), 75*time.Millisecond)
+}
+
+func TestRateReaderTimeoutDoesNotWaitPastReadDeadline(t *testing.T) {
+	const bytesPerSecond = 1000
+	reader := &singleMultiBufferReader{buffer: buf.MultiBuffer{buf.FromBytes(make([]byte, 1100))}}
+	bucket := rate.NewLimiter(bytesPerSecond, bytesPerSecond)
+	limited := New().RateReader(reader, bucket)
+
+	started := time.Now()
+	result, err := limited.ReadMultiBufferTimeout(20 * time.Millisecond)
+	require.NoError(t, err)
+	buf.ReleaseMulti(result)
+	require.Less(t, time.Since(started), 75*time.Millisecond)
+	require.Less(t, bucket.Tokens(), 0.0, "unwaited delay must remain as limiter debt")
 }
 
 type singleMultiBufferReader struct {
