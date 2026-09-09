@@ -1,0 +1,9 @@
+{
+  "ret": 1,
+  "data": [
+    {
+      "id": 7,
+      "regex": "(^|\\.)blocked\\.invalid$"
+    }
+  ]
+}

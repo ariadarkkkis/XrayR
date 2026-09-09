@@ -1,0 +1,23 @@
+{
+  "ret": 1,
+  "data": {
+    "node_group": 0,
+    "node_class": 0,
+    "node_speedlimit": 100,
+    "traffic_rate": 1,
+    "sort": 0,
+    "server": "fixture.invalid;12080;0;;tcp;path=/fixture|host=fixture.invalid",
+    "type": "v2ray",
+    "custom_config": {
+      "offset_port_node": "12080",
+      "host": "fixture.invalid",
+      "method": "",
+      "tls": "0",
+      "enable_vless": "0",
+      "network": "tcp",
+      "security": "",
+      "path": "/fixture"
+    },
+    "version": "2023.3"
+  }
+}

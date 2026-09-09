@@ -1,0 +1,15 @@
+{
+  "ret": 1,
+  "data": [
+    {
+      "id": 101,
+      "passwd": "fixture-password",
+      "port": 12080,
+      "method": "aes-128-gcm",
+      "node_speedlimit": 16,
+      "node_iplimit": 2,
+      "uuid": "00000000-0000-4000-8000-000000000101",
+      "alive_ip": 0
+    }
+  ]
+}

@@ -298,7 +298,6 @@ func (c *APIClient) ReportNodeOnlineUsers(onlineUserList *[]api.OnlineUser) erro
 		data[i] = OnlineUser{UID: user.UID, IP: user.IP}
 		reportOnline[user.UID]++ // will start from 1 if key doesn’t exist
 	}
-	c.LastReportOnline = reportOnline // Update LastReportOnline
 
 	postData := &PostData{Data: data}
 	path := "/mod_mu/users/aliveip"
@@ -313,6 +312,7 @@ func (c *APIClient) ReportNodeOnlineUsers(onlineUserList *[]api.OnlineUser) erro
 	if err != nil {
 		return err
 	}
+	c.LastReportOnline = reportOnline // Only successful reports affect device-limit reconciliation.
 
 	return nil
 }

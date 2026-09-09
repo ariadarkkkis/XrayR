@@ -30,23 +30,25 @@ type LimitInfo struct {
 }
 
 type Controller struct {
-	server       *core.Instance
-	config       *Config
-	clientInfo   api.ClientInfo
-	apiClient    api.API
-	nodeInfo     *api.NodeInfo
-	Tag          string
-	userList     *[]api.UserInfo
-	tasks        []periodicTask
-	limitedUsers map[api.UserInfo]LimitInfo
-	warnedUsers  map[api.UserInfo]int
-	panelType    string
-	ibm          inbound.Manager
-	obm          outbound.Manager
-	stm          stats.Manager
-	dispatcher   *mydispatcher.DefaultDispatcher
-	startAt      time.Time
-	logger       *log.Entry
+	server               *core.Instance
+	config               *Config
+	clientInfo           api.ClientInfo
+	apiClient            api.API
+	nodeInfo             *api.NodeInfo
+	Tag                  string
+	userList             *[]api.UserInfo
+	tasks                []periodicTask
+	limitedUsers         map[api.UserInfo]LimitInfo
+	warnedUsers          map[api.UserInfo]int
+	pendingOnlineUsers   []api.OnlineUser
+	pendingDetectResults []api.DetectResult
+	panelType            string
+	ibm                  inbound.Manager
+	obm                  outbound.Manager
+	stm                  stats.Manager
+	dispatcher           *mydispatcher.DefaultDispatcher
+	startAt              time.Time
+	logger               *log.Entry
 }
 
 type periodicTask struct {
@@ -79,6 +81,16 @@ func New(server *core.Instance, api api.API, config *Config, panelType string) *
 
 // Start implement the Start() function of the service interface
 func (c *Controller) Start() error {
+	if err := c.StartWithoutScheduling(); err != nil {
+		return err
+	}
+	c.schedulePeriodicTasks()
+	return nil
+}
+
+// StartWithoutScheduling initializes the controller without starting timers.
+// It is intended for deterministic reconciliation runs and lifecycle-managed callers.
+func (c *Controller) StartWithoutScheduling() error {
 	c.clientInfo = c.apiClient.Describe()
 	// First fetch Node Info
 	newNodeInfo, err := c.apiClient.GetNodeInfo()
@@ -94,7 +106,6 @@ func (c *Controller) Start() error {
 	// Add new tag
 	err = c.addNewTag(newNodeInfo)
 	if err != nil {
-		c.logger.Panic(err)
 		return err
 	}
 	// Update user
@@ -144,6 +155,10 @@ func (c *Controller) Start() error {
 		c.warnedUsers = make(map[api.UserInfo]int)
 	}
 
+	return nil
+}
+
+func (c *Controller) schedulePeriodicTasks() {
 	// Add periodic tasks
 	c.tasks = append(c.tasks,
 		periodicTask{
@@ -175,8 +190,6 @@ func (c *Controller) Start() error {
 		c.logger.Printf("Start %s periodic task", c.tasks[i].tag)
 		go c.tasks[i].Start()
 	}
-
-	return nil
 }
 
 // Close implement the Close() function of the service interface
@@ -192,11 +205,25 @@ func (c *Controller) Close() error {
 	return nil
 }
 
+// ReconcileAndReportOnce performs exactly one panel refresh and reporting pass.
+// It does not create timers, wait for signals, or start background work.
+func (c *Controller) ReconcileAndReportOnce() error {
+	return errors.Join(c.reconcileOnce(), c.reportOnce())
+}
+
 func (c *Controller) nodeInfoMonitor() (err error) {
 	// delay to start
 	if time.Since(c.startAt) < time.Duration(c.config.UpdatePeriodic)*time.Second {
 		return nil
 	}
+	if err := c.reconcileOnce(); err != nil {
+		c.logger.Print(err)
+	}
+	return nil
+}
+
+func (c *Controller) reconcileOnce() error {
+	var cycleErrors []error
 
 	// First fetch Node Info
 	var nodeInfoChanged = true
@@ -206,8 +233,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			nodeInfoChanged = false
 			newNodeInfo = c.nodeInfo
 		} else {
-			c.logger.Print(err)
-			return nil
+			return fmt.Errorf("refresh node info: %w", err)
 		}
 	}
 	if newNodeInfo.Port == 0 {
@@ -230,8 +256,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			usersChanged = false
 			newUserInfo = c.userList
 		} else {
-			c.logger.Print(err)
-			return nil
+			return fmt.Errorf("refresh user list: %w", err)
 		}
 	}
 
@@ -242,29 +267,25 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			oldTag := c.Tag
 			err := c.removeOldTag(oldTag)
 			if err != nil {
-				c.logger.Print(err)
-				return nil
+				return fmt.Errorf("remove old runtime tag: %w", err)
 			}
 			if c.nodeInfo.NodeType == "Shadowsocks-Plugin" {
 				err = c.removeOldTag(fmt.Sprintf("dokodemo-door_%s+1", c.Tag))
 			}
 			if err != nil {
-				c.logger.Print(err)
-				return nil
+				return fmt.Errorf("remove old plugin runtime tag: %w", err)
 			}
 			// Add new tag
 			c.nodeInfo = newNodeInfo
 			c.Tag = c.buildNodeTag()
 			err = c.addNewTag(newNodeInfo)
 			if err != nil {
-				c.logger.Print(err)
-				return nil
+				return fmt.Errorf("add refreshed runtime tag: %w", err)
 			}
 			nodeInfoChanged = true
 			// Remove Old limiter
 			if err = c.DeleteInboundLimiter(oldTag); err != nil {
-				c.logger.Print(err)
-				return nil
+				return fmt.Errorf("remove old inbound limiter: %w", err)
 			}
 		} else {
 			nodeInfoChanged = false
@@ -275,11 +296,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	if !c.config.DisableGetRule {
 		if ruleList, err := c.apiClient.GetNodeRule(); err != nil {
 			if err.Error() != api.RuleNotModified {
-				c.logger.Printf("Get rule list filed: %s", err)
+				cycleErrors = append(cycleErrors, fmt.Errorf("refresh detection rules: %w", err))
 			}
 		} else if len(*ruleList) > 0 {
 			if err := c.UpdateRule(c.Tag, *ruleList); err != nil {
-				c.logger.Print(err)
+				cycleErrors = append(cycleErrors, fmt.Errorf("update detection rules: %w", err))
 			}
 		}
 	}
@@ -287,14 +308,12 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	if nodeInfoChanged {
 		err = c.addNewUser(newUserInfo, newNodeInfo)
 		if err != nil {
-			c.logger.Print(err)
-			return nil
+			return fmt.Errorf("add refreshed users: %w", err)
 		}
 
 		// Add Limiter
 		if err := c.AddInboundLimiter(c.Tag, newNodeInfo.SpeedLimit, newUserInfo, c.config.GlobalDeviceLimitConfig); err != nil {
-			c.logger.Print(err)
-			return nil
+			return fmt.Errorf("add refreshed inbound limiter: %w", err)
 		}
 
 	} else {
@@ -308,24 +327,24 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 				}
 				err := c.removeUsers(deletedEmail, c.Tag)
 				if err != nil {
-					c.logger.Print(err)
+					return fmt.Errorf("remove stale users: %w", err)
 				}
 			}
 			if len(added) > 0 {
 				err = c.addNewUser(&added, c.nodeInfo)
 				if err != nil {
-					c.logger.Print(err)
+					return fmt.Errorf("add refreshed users: %w", err)
 				}
 				// Update Limiter
 				if err := c.UpdateInboundLimiter(c.Tag, &added); err != nil {
-					c.logger.Print(err)
+					return fmt.Errorf("update inbound limiter: %w", err)
 				}
 			}
 		}
 		c.logger.Printf("%d user deleted, %d user added", len(deleted), len(added))
 	}
 	c.userList = newUserInfo
-	return nil
+	return errors.Join(cycleErrors...)
 }
 
 func (c *Controller) removeOldTag(oldTag string) (err error) {
@@ -501,6 +520,14 @@ func (c *Controller) userInfoMonitor() (err error) {
 	if time.Since(c.startAt) < time.Duration(c.config.UpdatePeriodic)*time.Second {
 		return nil
 	}
+	if err := c.reportOnce(); err != nil {
+		c.logger.Print(err)
+	}
+	return nil
+}
+
+func (c *Controller) reportOnce() error {
+	var cycleErrors []error
 
 	// Get server status
 	CPU, Mem, Disk, Uptime, err := serverstatus.GetSystemInfo()
@@ -515,7 +542,7 @@ func (c *Controller) userInfoMonitor() (err error) {
 			Uptime: Uptime,
 		})
 	if err != nil {
-		c.logger.Print(err)
+		cycleErrors = append(cycleErrors, fmt.Errorf("report node status: %w", err))
 	}
 	// Unlock users
 	if c.config.AutoSpeedLimitConfig.Limit > 0 && len(c.limitedUsers) > 0 {
@@ -533,7 +560,7 @@ func (c *Controller) userInfoMonitor() (err error) {
 		}
 		if len(toReleaseUsers) > 0 {
 			if err := c.UpdateInboundLimiter(c.Tag, &toReleaseUsers); err != nil {
-				c.logger.Print(err)
+				cycleErrors = append(cycleErrors, fmt.Errorf("release limited users: %w", err))
 			}
 		}
 	}
@@ -584,7 +611,7 @@ func (c *Controller) userInfoMonitor() (err error) {
 	}
 	if len(limitedUsers) > 0 {
 		if err := c.UpdateInboundLimiter(c.Tag, &limitedUsers); err != nil {
-			c.logger.Print(err)
+			cycleErrors = append(cycleErrors, fmt.Errorf("apply user speed limits: %w", err))
 		}
 	}
 
@@ -595,15 +622,17 @@ func (c *Controller) userInfoMonitor() (err error) {
 		}
 		// If report traffic error, not clear the traffic
 		if err != nil {
-			c.logger.Print(err)
+			cycleErrors = append(cycleErrors, fmt.Errorf("report user traffic: %w", err))
 		} else {
 			c.resetTraffic(&upCounterList, &downCounterList)
 		}
 	}
 
-	// Report Online info
-	if onlineDevice, err := c.GetOnlineDevice(c.Tag); err != nil {
-		c.logger.Print(err)
+	// Report Online info. Collection drains the limiter, so keep a pending copy
+	// until the panel acknowledges it.
+	onlineDevice, err := c.GetOnlineDevice(c.Tag)
+	if err != nil {
+		cycleErrors = append(cycleErrors, fmt.Errorf("collect online users: %w", err))
 	} else if len(*onlineDevice) > 0 {
 		// Only report user has traffic > 100kb to allow ping test
 		var result []api.OnlineUser
@@ -619,26 +648,65 @@ func (c *Controller) userInfoMonitor() (err error) {
 				result = append(result, online)
 			}
 		}
+		c.pendingOnlineUsers = appendUniqueOnlineUsers(c.pendingOnlineUsers, result)
+	}
 
-		if err = c.apiClient.ReportNodeOnlineUsers(&result); err != nil {
-			log.Print(err)
+	if len(c.pendingOnlineUsers) > 0 {
+		if err := c.apiClient.ReportNodeOnlineUsers(&c.pendingOnlineUsers); err != nil {
+			cycleErrors = append(cycleErrors, fmt.Errorf("report online users: %w", err))
 		} else {
-			log.Printf("Total %d online users, %d Reported", len(*onlineDevice), len(result))
+			log.Printf("Reported %d online users", len(c.pendingOnlineUsers))
+			c.pendingOnlineUsers = nil
 		}
 	}
 
-	// Report Illegal user
-	if detectResult, err := c.GetDetectResult(c.Tag); err != nil {
-		c.logger.Print(err)
+	// Report Illegal user. Detection collection is destructive, so retain the
+	// batch until the panel acknowledges it.
+	detectResult, err := c.GetDetectResult(c.Tag)
+	if err != nil {
+		cycleErrors = append(cycleErrors, fmt.Errorf("collect detection results: %w", err))
 	} else if len(*detectResult) > 0 {
-		if err = c.apiClient.ReportIllegal(detectResult); err != nil {
-			c.logger.Print(err)
-		} else {
-			c.logger.Printf("Report %d illegal behaviors", len(*detectResult))
-		}
-
+		c.pendingDetectResults = appendUniqueDetectResults(c.pendingDetectResults, *detectResult)
 	}
-	return nil
+	if len(c.pendingDetectResults) > 0 {
+		if err := c.apiClient.ReportIllegal(&c.pendingDetectResults); err != nil {
+			cycleErrors = append(cycleErrors, fmt.Errorf("report detection results: %w", err))
+		} else {
+			c.logger.Printf("Report %d illegal behaviors", len(c.pendingDetectResults))
+			c.pendingDetectResults = nil
+		}
+	}
+	return errors.Join(cycleErrors...)
+}
+
+func appendUniqueOnlineUsers(existing, additions []api.OnlineUser) []api.OnlineUser {
+	seen := make(map[api.OnlineUser]struct{}, len(existing)+len(additions))
+	for _, online := range existing {
+		seen[online] = struct{}{}
+	}
+	for _, online := range additions {
+		if _, ok := seen[online]; ok {
+			continue
+		}
+		seen[online] = struct{}{}
+		existing = append(existing, online)
+	}
+	return existing
+}
+
+func appendUniqueDetectResults(existing, additions []api.DetectResult) []api.DetectResult {
+	seen := make(map[api.DetectResult]struct{}, len(existing)+len(additions))
+	for _, result := range existing {
+		seen[result] = struct{}{}
+	}
+	for _, result := range additions {
+		if _, ok := seen[result]; ok {
+			continue
+		}
+		seen[result] = struct{}{}
+		existing = append(existing, result)
+	}
+	return existing
 }
 
 func (c *Controller) buildNodeTag() string {
