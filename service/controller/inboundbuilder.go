@@ -303,16 +303,8 @@ func isSupportedShadowsocksMethod(method string) bool {
 	if C.Contains(shadowaead_2022.List, method) {
 		return true
 	}
-	switch method {
-	case "aes-128-gcm", "aead_aes_128_gcm",
-		"aes-256-gcm", "aead_aes_256_gcm",
-		"chacha20-poly1305", "aead_chacha20_poly1305", "chacha20-ietf-poly1305",
-		"xchacha20-poly1305", "aead_xchacha20_poly1305", "xchacha20-ietf-poly1305",
-		"none", "plain":
-		return true
-	default:
-		return false
-	}
+	_, ok := shadowsocksCipherByMethod[method]
+	return ok
 }
 
 func validateREALITYShortIDs(nodeID int, shortIDs []string) error {

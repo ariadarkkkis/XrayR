@@ -25,6 +25,21 @@ var AEADMethod = map[shadowsocks.CipherType]uint8{
 	shadowsocks.CipherType_XCHACHA20_POLY1305: 0,
 }
 
+var shadowsocksCipherByMethod = map[string]shadowsocks.CipherType{
+	"aes-128-gcm":             shadowsocks.CipherType_AES_128_GCM,
+	"aead_aes_128_gcm":        shadowsocks.CipherType_AES_128_GCM,
+	"aes-256-gcm":             shadowsocks.CipherType_AES_256_GCM,
+	"aead_aes_256_gcm":        shadowsocks.CipherType_AES_256_GCM,
+	"chacha20-poly1305":       shadowsocks.CipherType_CHACHA20_POLY1305,
+	"aead_chacha20_poly1305":  shadowsocks.CipherType_CHACHA20_POLY1305,
+	"chacha20-ietf-poly1305":  shadowsocks.CipherType_CHACHA20_POLY1305,
+	"xchacha20-poly1305":      shadowsocks.CipherType_XCHACHA20_POLY1305,
+	"aead_xchacha20_poly1305": shadowsocks.CipherType_XCHACHA20_POLY1305,
+	"xchacha20-ietf-poly1305": shadowsocks.CipherType_XCHACHA20_POLY1305,
+	"none":                    shadowsocks.CipherType_NONE,
+	"plain":                   shadowsocks.CipherType_NONE,
+}
+
 func (c *Controller) buildVmessUser(userInfo *[]api.UserInfo) (users []*protocol.User) {
 	users = make([]*protocol.User, len(*userInfo))
 	for i, user := range *userInfo {
@@ -143,20 +158,10 @@ func (c *Controller) buildSSPluginUser(userInfo *[]api.UserInfo) (users []*proto
 }
 
 func cipherFromString(c string) shadowsocks.CipherType {
-	switch strings.ToLower(c) {
-	case "aes-128-gcm", "aead_aes_128_gcm":
-		return shadowsocks.CipherType_AES_128_GCM
-	case "aes-256-gcm", "aead_aes_256_gcm":
-		return shadowsocks.CipherType_AES_256_GCM
-	case "chacha20-poly1305", "aead_chacha20_poly1305", "chacha20-ietf-poly1305":
-		return shadowsocks.CipherType_CHACHA20_POLY1305
-	case "xchacha20-poly1305", "aead_xchacha20_poly1305", "xchacha20-ietf-poly1305":
-		return shadowsocks.CipherType_XCHACHA20_POLY1305
-	case "none", "plain":
-		return shadowsocks.CipherType_NONE
-	default:
-		return shadowsocks.CipherType_UNKNOWN
+	if cipher, ok := shadowsocksCipherByMethod[strings.ToLower(c)]; ok {
+		return cipher
 	}
+	return shadowsocks.CipherType_UNKNOWN
 }
 
 func (c *Controller) buildUserTag(user *api.UserInfo) string {

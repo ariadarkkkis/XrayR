@@ -3,8 +3,10 @@ package limiter
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/xtls/xray-core/common/buf"
 	"golang.org/x/time/rate"
 
 	"github.com/ariadarkkkis/XrayR/api"
@@ -32,4 +34,30 @@ func TestDeleteInboundUsersClearsRuntimeState(t *testing.T) {
 	require.False(t, userExists)
 	require.False(t, bucketExists)
 	require.False(t, onlineExists)
+}
+
+func TestRateReaderThrottlesBuffersLargerThanBurst(t *testing.T) {
+	const bytesPerSecond = 1000
+	reader := &singleMultiBufferReader{buffer: buf.MultiBuffer{buf.FromBytes(make([]byte, 1100))}}
+	limited := New().RateReader(reader, rate.NewLimiter(bytesPerSecond, bytesPerSecond))
+
+	started := time.Now()
+	result, err := limited.ReadMultiBuffer()
+	require.NoError(t, err)
+	buf.ReleaseMulti(result)
+	require.GreaterOrEqual(t, time.Since(started), 75*time.Millisecond)
+}
+
+type singleMultiBufferReader struct {
+	buffer buf.MultiBuffer
+}
+
+func (r *singleMultiBufferReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
+	result := r.buffer
+	r.buffer = nil
+	return result, nil
+}
+
+func (r *singleMultiBufferReader) ReadMultiBufferTimeout(time.Duration) (buf.MultiBuffer, error) {
+	return r.ReadMultiBuffer()
 }

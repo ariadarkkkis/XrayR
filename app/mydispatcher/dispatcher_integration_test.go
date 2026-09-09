@@ -1,6 +1,7 @@
 package mydispatcher_test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -33,19 +34,21 @@ func TestRealConnectionTraversesPolicyAndAccountingHooks(t *testing.T) {
 	server := startDispatcherCore(t, proxyPort)
 
 	dispatcher := server.GetFeature(featureRouting.DispatcherType()).(*mydispatcher.DefaultDispatcher)
-	users := []api.UserInfo{{UID: 7, Email: "fixture", SpeedLimit: 1024 * 1024, DeviceLimit: 1}}
+	users := []api.UserInfo{{UID: 7, Email: "fixture", SpeedLimit: 1000, DeviceLimit: 1}}
 	require.NoError(t, dispatcher.Limiter.AddInboundLimiter("dispatcher", 0, &users, nil))
 
 	conn := dialSOCKS5(t, proxyPort, "dispatcher|fixture|7", "fixture-password", echoAddress)
 	t.Cleanup(func() { require.NoError(t, conn.Close()) })
-	payload := []byte("dispatcher integration payload")
+	payload := bytes.Repeat([]byte("x"), 1100)
 	require.NoError(t, conn.SetDeadline(time.Now().Add(5*time.Second)))
+	started := time.Now()
 	_, err := conn.Write(payload)
 	require.NoError(t, err)
 	reply := make([]byte, len(payload))
 	_, err = io.ReadFull(conn, reply)
 	require.NoError(t, err)
 	require.Equal(t, payload, reply)
+	require.GreaterOrEqual(t, time.Since(started), 900*time.Millisecond, "configured user speed limit must throttle the real connection")
 
 	manager := server.GetFeature(featureStats.ManagerType()).(featureStats.Manager)
 	require.Eventually(t, func() bool {

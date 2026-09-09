@@ -51,6 +51,15 @@ func TestDynamicUsersAndHandlersReconcileWithoutLosingLastWorkingRuntime(t *test
 	require.NoError(t, err)
 
 	lastWorkingTag := c.Tag
+	require.NoError(t, c.DeleteInboundLimiter(lastWorkingTag))
+	client.users = []api.UserInfo{{UID: 4, Email: "fourth", UUID: "00000000-0000-4000-8000-000000000004"}}
+	err = c.ReconcileAndReportOnce()
+	require.ErrorContains(t, err, "limiter")
+	reader = runtimeUsers(t, server, lastWorkingTag)
+	require.NotNil(t, reader.GetUser(t.Context(), lastWorkingTag+"|third|3"), "failed user refresh must restore deleted users")
+	require.Nil(t, reader.GetUser(t.Context(), lastWorkingTag+"|fourth|4"), "failed user refresh must remove partially added users")
+
+	client.users = []api.UserInfo{{UID: 3, Email: "third", UUID: "00000000-0000-4000-8000-000000000003"}}
 	client.node = api.NodeInfo{
 		NodeType:          "Vless",
 		NodeID:            51,

@@ -300,22 +300,26 @@ func (c *Controller) reconcileOnce() error {
 			if len(deleted) > 0 {
 				deletedEmail = make([]string, len(deleted))
 				for i, u := range deleted {
-					deletedEmail[i] = fmt.Sprintf("%s|%s|%d", c.Tag, u.Email, u.UID)
+					deletedEmail[i] = c.buildUserTag(&u)
 				}
 				if err := c.removeUsers(deletedEmail, c.Tag); err != nil {
-					return fmt.Errorf("remove stale users: %w", err)
+					restoreErr := c.restoreUserRuntime(c.userList, newUserInfo)
+					return errors.Join(fmt.Errorf("remove stale users: %w", err), restoreErr)
 				}
 				if err := c.DeleteInboundUsers(c.Tag, deletedEmail); err != nil {
-					return fmt.Errorf("remove stale users from limiter: %w", err)
+					restoreErr := c.restoreUserRuntime(c.userList, newUserInfo)
+					return errors.Join(fmt.Errorf("remove stale users from limiter: %w", err), restoreErr)
 				}
 			}
 			if len(added) > 0 {
 				if err := c.addNewUser(&added, c.nodeInfo); err != nil {
-					return fmt.Errorf("add refreshed users: %w", err)
+					restoreErr := c.restoreUserRuntime(c.userList, newUserInfo)
+					return errors.Join(fmt.Errorf("add refreshed users: %w", err), restoreErr)
 				}
 				// Update Limiter
 				if err := c.UpdateInboundLimiter(c.Tag, &added); err != nil {
-					return fmt.Errorf("update inbound limiter: %w", err)
+					restoreErr := c.restoreUserRuntime(c.userList, newUserInfo)
+					return errors.Join(fmt.Errorf("update inbound limiter: %w", err), restoreErr)
 				}
 			}
 		}
@@ -431,6 +435,27 @@ func (c *Controller) restoreNodeRuntime(oldNodeInfo *api.NodeInfo, oldUserInfo *
 		restoreErrors = append(restoreErrors, fmt.Errorf("restore previous users: %w", err))
 	}
 	if err := c.AddInboundLimiter(oldTag, oldNodeInfo.SpeedLimit, oldUserInfo, c.config.GlobalDeviceLimitConfig); err != nil {
+		restoreErrors = append(restoreErrors, fmt.Errorf("restore previous limiter: %w", err))
+	}
+	return errors.Join(restoreErrors...)
+}
+
+func (c *Controller) restoreUserRuntime(oldUserInfo, attemptedUserInfo *[]api.UserInfo) error {
+	userTags := make(map[string]struct{}, len(*oldUserInfo)+len(*attemptedUserInfo))
+	for _, users := range []*[]api.UserInfo{oldUserInfo, attemptedUserInfo} {
+		for i := range *users {
+			userTags[c.buildUserTag(&(*users)[i])] = struct{}{}
+		}
+	}
+	for userTag := range userTags {
+		_ = c.removeUsers([]string{userTag}, c.Tag)
+	}
+
+	var restoreErrors []error
+	if err := c.addNewUser(oldUserInfo, c.nodeInfo); err != nil {
+		restoreErrors = append(restoreErrors, fmt.Errorf("restore previous users: %w", err))
+	}
+	if err := c.AddInboundLimiter(c.Tag, c.nodeInfo.SpeedLimit, oldUserInfo, c.config.GlobalDeviceLimitConfig); err != nil {
 		restoreErrors = append(restoreErrors, fmt.Errorf("restore previous limiter: %w", err))
 	}
 	return errors.Join(restoreErrors...)

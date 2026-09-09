@@ -2,6 +2,7 @@ package limiter
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -28,7 +29,9 @@ func (l *Limiter) RateReader(reader buf.TimeoutReader, limiter *rate.Limiter) bu
 func (r *Reader) ReadMultiBuffer() (buf.MultiBuffer, error) {
 	mb, err := r.reader.ReadMultiBuffer()
 	if !mb.IsEmpty() {
-		_ = r.limiter.WaitN(context.Background(), int(mb.Len()))
+		if waitErr := waitForTokens(r.limiter, int(mb.Len())); waitErr != nil && err == nil {
+			err = waitErr
+		}
 	}
 	return mb, err
 }
@@ -36,9 +39,19 @@ func (r *Reader) ReadMultiBuffer() (buf.MultiBuffer, error) {
 func (r *Reader) ReadMultiBufferTimeout(timeout time.Duration) (buf.MultiBuffer, error) {
 	mb, err := r.reader.ReadMultiBufferTimeout(timeout)
 	if !mb.IsEmpty() {
-		_ = r.limiter.WaitN(context.Background(), int(mb.Len()))
+		if waitErr := waitForTokens(r.limiter, int(mb.Len())); waitErr != nil && err == nil {
+			err = waitErr
+		}
 	}
 	return mb, err
+}
+
+func (r *Reader) Interrupt() {
+	if wrapper, ok := r.reader.(*buf.TimeoutWrapperReader); ok {
+		_ = common.Interrupt(wrapper.Reader)
+		return
+	}
+	_ = common.Interrupt(r.reader)
 }
 
 func (l *Limiter) RateWriter(writer buf.Writer, limiter *rate.Limiter) buf.Writer {
@@ -53,7 +66,22 @@ func (w *Writer) Close() error {
 }
 
 func (w *Writer) WriteMultiBuffer(mb buf.MultiBuffer) error {
-	ctx := context.Background()
-	w.limiter.WaitN(ctx, int(mb.Len()))
+	if err := waitForTokens(w.limiter, int(mb.Len())); err != nil {
+		return err
+	}
 	return w.writer.WriteMultiBuffer(mb)
+}
+
+func waitForTokens(limiter *rate.Limiter, count int) error {
+	if limiter.Burst() <= 0 {
+		return fmt.Errorf("rate limiter burst must be positive")
+	}
+	for count > 0 {
+		chunk := min(count, limiter.Burst())
+		if err := limiter.WaitN(context.Background(), chunk); err != nil {
+			return err
+		}
+		count -= chunk
+	}
+	return nil
 }

@@ -20,6 +20,7 @@ import (
 	. "github.com/ariadarkkkis/XrayR/service/controller"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"github.com/xtls/xray-core/app/proxyman"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/inbound"
 )
@@ -174,17 +175,29 @@ func TestProtocolTransportCompatibilityMatrix(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name   string
-		node   api.NodeInfo
-		config Config
+		name        string
+		node        api.NodeInfo
+		config      Config
+		assertBuilt func(*testing.T, *core.InboundHandlerConfig)
 	}{
 		{name: "VMess over TCP", node: api.NodeInfo{NodeType: "Vmess", TransportProtocol: "tcp"}},
 		{name: "SSPanel VLESS over WebSocket", node: api.NodeInfo{NodeType: "V2ray", EnableVless: true, TransportProtocol: "ws", Host: "fixture.invalid", Path: "/ws"}},
-		{name: "Trojan over gRPC", node: api.NodeInfo{NodeType: "Trojan", TransportProtocol: "grpc", ServiceName: "fixture"}},
+		{
+			name:   "Trojan over gRPC with socket settings",
+			node:   api.NodeInfo{NodeType: "Trojan", TransportProtocol: "grpc", ServiceName: "fixture"},
+			config: Config{EnableProxyProtocol: true},
+			assertBuilt: func(t *testing.T, built *core.InboundHandlerConfig) {
+				receiverMessage, err := built.ReceiverSettings.GetInstance()
+				require.NoError(t, err)
+				receiver := receiverMessage.(*proxyman.ReceiverConfig)
+				require.NotNil(t, receiver.StreamSettings.SocketSettings)
+				require.True(t, receiver.StreamSettings.SocketSettings.AcceptProxyProtocol)
+			},
+		},
 		{name: "Shadowsocks over HTTPUpgrade", node: api.NodeInfo{NodeType: "Shadowsocks", TransportProtocol: "httpupgrade", CypherMethod: "aes-128-gcm", Path: "/upgrade"}},
 		{name: "Shadowsocks 2022 over SplitHTTP", node: api.NodeInfo{NodeType: "Shadowsocks", TransportProtocol: "splithttp", CypherMethod: "2022-blake3-aes-256-gcm", ServerKey: base64.StdEncoding.EncodeToString(shadowsocks2022Key), Path: "/split"}},
 		{name: "VLESS over XHTTP", node: api.NodeInfo{NodeType: "Vless", TransportProtocol: "xhttp", Path: "/xhttp"}},
-		{name: "VLESS with TLS and socket settings", node: api.NodeInfo{NodeType: "Vless", TransportProtocol: "ws", Path: "/tls", EnableTLS: true}, config: Config{CertConfig: certConfig, EnableProxyProtocol: true}},
+		{name: "VLESS with TLS over WebSocket", node: api.NodeInfo{NodeType: "Vless", TransportProtocol: "ws", Path: "/tls", EnableTLS: true}, config: Config{CertConfig: certConfig, EnableProxyProtocol: true}},
 		{name: "VLESS with REALITY", node: api.NodeInfo{NodeType: "Vless", TransportProtocol: "tcp", EnableREALITY: true, REALITYConfig: &api.REALITYConfig{Dest: "127.0.0.1:443", ServerNames: []string{"fixture.invalid"}, PrivateKey: base64.RawURLEncoding.EncodeToString(realityKey), ShortIds: []string{"0123456789abcdef"}}}, config: Config{DisableLocalREALITYConfig: true}},
 		{name: "VLESS with fallback", node: api.NodeInfo{NodeType: "Vless", TransportProtocol: "tcp"}, config: Config{EnableFallback: true, FallBackConfigs: []*FallBackConfig{{SNI: "fixture.invalid", Dest: "127.0.0.1:9"}}}},
 		{name: "Trojan with fallback", node: api.NodeInfo{NodeType: "Trojan", TransportProtocol: "tcp"}, config: Config{EnableFallback: true, FallBackConfigs: []*FallBackConfig{{SNI: "fixture.invalid", Dest: "127.0.0.1:9"}}}},
@@ -197,6 +210,9 @@ func TestProtocolTransportCompatibilityMatrix(t *testing.T) {
 			test.node.Port = uint32(availablePort(t))
 			built, err := InboundBuilder(&test.config, &test.node, "matrix")
 			require.NoError(t, err)
+			if test.assertBuilt != nil {
+				test.assertBuilt(t, built)
+			}
 			server := startCore(t)
 			manager := server.GetFeature(inbound.ManagerType()).(inbound.Manager)
 			require.NoError(t, core.AddInboundHandler(server, built))
