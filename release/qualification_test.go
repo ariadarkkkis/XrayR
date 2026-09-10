@@ -91,7 +91,7 @@ func TestReleaseBuildRejectsUnrecordedSourceChanges(t *testing.T) {
 	require.NoError(t, err)
 	contents := string(buildScript)
 
-	require.Contains(t, contents, "git diff --quiet HEAD --")
+	require.Contains(t, contents, "git -C \"$repository_root\" diff --quiet HEAD --")
 	require.Contains(t, contents, "git -C \"$repository_root\" status --porcelain --untracked-files=all")
 	require.Contains(t, contents, "Dockerfile .dockerignore")
 	require.Contains(t, contents, "'scripts/**' '.github/workflows/release.yml'")

@@ -53,11 +53,12 @@ type panelFailureMode struct {
 	detectionReport bool
 }
 
-func newFixturePanel(t *testing.T, port int) (*fixturePanel, *httptest.Server) {
+func newFixturePanel(t *testing.T) (*fixturePanel, *httptest.Server) {
 	t.Helper()
-	panel := &fixturePanel{t: t, port: port, getCount: make(map[string]int)}
+	panel := &fixturePanel{t: t, getCount: make(map[string]int)}
 	server := httptest.NewServer(http.HandlerFunc(panel.serveHTTP))
 	t.Cleanup(server.Close)
+	panel.port = availablePort(t)
 	return panel, server
 }
 
@@ -141,8 +142,7 @@ func (p *fixturePanel) snapshot() []cycleRequest {
 }
 
 func TestSSPanel2023ControllerReconciliationAndReportingCycle(t *testing.T) {
-	port := availablePort(t)
-	panel, panelServer := newFixturePanel(t, port)
+	panel, panelServer := newFixturePanel(t)
 	server := startCore(t)
 	client := newSSPanelClient(panelServer.URL)
 	c := controller.New(server, client, testControllerConfig(), "SSpanel")
@@ -167,8 +167,7 @@ func TestSSPanel2023ControllerReconciliationAndReportingCycle(t *testing.T) {
 }
 
 func TestCycleKeepsRuntimeAndTrafficAcrossPanelFailures(t *testing.T) {
-	port := availablePort(t)
-	panel, panelServer := newFixturePanel(t, port)
+	panel, panelServer := newFixturePanel(t)
 	server := startCore(t)
 	c := controller.New(server, newSSPanelClient(panelServer.URL), testControllerConfig(), "SSpanel")
 	require.NoError(t, c.StartWithoutScheduling())
