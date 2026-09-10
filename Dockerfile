@@ -12,6 +12,6 @@ ENV TZ=Asia/Shanghai
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY release/config/geoip.dat /etc/XrayR/geoip.dat
 COPY release/config/geosite.dat /etc/XrayR/geosite.dat
-COPY --from=builder /app/XrayR /usr/local/bin
+COPY --from=builder /app/XrayR /usr/local/bin/XrayR
 
 ENTRYPOINT [ "/usr/local/bin/XrayR", "--config", "/etc/XrayR/config.yml"]

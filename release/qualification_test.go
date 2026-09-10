@@ -84,6 +84,7 @@ func TestProductionContainerUsesAlignedBuilderAndPackagedAssets(t *testing.T) {
 	require.NotContains(t, contents, "raw.githubusercontent.com", "container builds must use the repository's qualified assets")
 	require.Contains(t, contents, "COPY release/config/geoip.dat /etc/XrayR/geoip.dat")
 	require.Contains(t, contents, "COPY release/config/geosite.dat /etc/XrayR/geosite.dat")
+	require.Contains(t, contents, "COPY --from=builder /app/XrayR /usr/local/bin/XrayR")
 }
 
 func TestReleaseBuildRejectsUnrecordedSourceChanges(t *testing.T) {
