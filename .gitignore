@@ -19,3 +19,4 @@ error.log
 cert
 config.yml
 updateR.sh
+.scratch/
